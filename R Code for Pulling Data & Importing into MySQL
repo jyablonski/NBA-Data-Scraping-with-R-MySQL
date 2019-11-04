@@ -15,6 +15,7 @@ today <- Sys.Date()
 
 
 # get gamelogs from the entire season ----
+# we want to exclude "today" because pulling gamelogs from today leads to null values in our dataset
 gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
 for(i in 1:nrow(gameLogs)){
   if(gameLogs$dateGame[i] != today){
@@ -28,7 +29,10 @@ for(i in 1:nrow(gameLogs)){
              Player = namePlayer, PlayerID = idPlayer, FGM = fgm, FGA = fga, FGPercent = pctFG, threePFGMade = fg3m, 
              threePAttempted = fg3a, threePointPercent = pctFG3, FTPercent = pctFT, twoPointFGMade = fg2m, 
              twoPointFGAttempted = fg2a, twoPointFGPercent = pctFG2, MP = minutes, FTM = ftm, FTA = fta, OREB = oreb,
-             DREB = dreb, TRB = treb, AST = ast, STL = stl, BLK = blk, TOV = tov, PF = pf, PTS = pts, PlusMinus = plusminus)
+             DREB = dreb, TRB = treb, AST = ast, STL = stl, BLK = blk, TOV = tov, PF = pf, PTS = pts, PlusMinus = plusminus) %>%
+      mutate(isB2B = isB2B * 1,
+             isB2BFirst = isB2BFirst * 1,
+             isB2BSecond = isB2BSecond * 1)
     dbWriteTable(con=basketball, value=currentLine, name=paste0("full_season_gamelogs"), append=TRUE, overwrite=FALSE)
     message(i)
   }
@@ -45,28 +49,8 @@ for(i in nrow(sched):1){
   }
 }
 
-# scrape gamelogs from yesterdays games based on schedule STEP 2 ----
-gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
-for(i in 1:nrow(gameLogs)){
-  dateString <- gameLogs$dateGame[i]
-  if(as.Date(dateString)==yesterday){
-    currentLine <- as.data.frame(gameLogs[i,])
-    currentLine <- currentLine %>%
-      select(yearSeason, dateGame, idGame, numberGameTeamSeason, slugTeam, isB2B, isB2BFirst, isB2BSecond, locationGame,
-             countDaysRestTeam, slugOpponent, outcomeGame, namePlayer, idPlayer, fgm, fga, pctFG, fg3m, fg3a, pctFG3, pctFT,
-             fg2m, fg2a, pctFG2, minutes, ftm, fta, oreb, dreb, treb, ast, stl, blk, tov, pf, pts, plusminus) %>%
-      rename(Season = yearSeason, Date = dateGame, GameID = idGame, TeamGamesPlayed = numberGameTeamSeason, Team = slugTeam, 
-             Location = locationGame, DaysRest = countDaysRestTeam, Opponent = slugOpponent, Outcome = outcomeGame, 
-             Player = namePlayer, PlayerID = idPlayer, FGM = fgm, FGA = fga, FGPercent = pctFG, threePFGMade = fg3m, 
-             threePAttempted = fg3a, threePointPercent = pctFG3, FTPercent = pctFT, twoPointFGMade = fg2m, 
-             twoPointFGAttempted = fg2a, twoPointFGPercent = pctFG2, MP = minutes, FTM = ftm, FTA = fta, OREB = oreb,
-             DREB = dreb, TRB = treb, AST = ast, STL = stl, BLK = blk, TOV = tov, PF = pf, PTS = pts, PlusMinus = plusminus)
-    dbWriteTable(con=basketball, value=currentLine, name=paste0("yesterdays_gamelogs"), append=TRUE, overwrite=FALSE)
-    message(i)
-  }
-}
-
 # adding yesterday's games into the full season gamelogs table ----
+gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
 for(i in 1:nrow(gameLogs)){
   dateString <- gameLogs$dateGame[i]
   if(as.Date(dateString)==yesterday){
@@ -85,3 +69,4 @@ for(i in 1:nrow(gameLogs)){
     message(i)
   }
 }
+
