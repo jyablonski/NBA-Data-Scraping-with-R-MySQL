@@ -1,20 +1,34 @@
 library(nbastatR)
-library(stringr)
-library(stringi)
 library(RMySQL)
-library(XML2R)
-library(xlsx)
-library(mailR)
-library(rvest)
 library(tidyverse)
+
 
 # connect to MySQL Database ----
 basketball <- dbConnect(dbDriver('MySQL'), dbname = 'nba2019_20', user = 'root', password = 'password')
 today <- Sys.Date()
 
+# Salary Data Only STEP 1 ----
+salary <- nba_insider_salaries(assume_player_opt_out = F,
+                     assume_team_doesnt_exercise = F, return_wide = F,
+                     return_message = T)
+for(i in 1:nrow(salary)){
+  currentLine <- as.data.frame(salary[i,])
+  currentLine <- currentLine %>%
+    filter(slugSeason == '2019-20', statusPlayer == 'current roster') %>%
+    select(namePlayer, nameTeam, slugSeason, statusPlayer, typeContractDetail, value,
+           isFinalSeason, isWaived, isOnRoster, isNonGuaranteed, isTeamOption, isPlayerOption) %>%
+    rename(Player = namePlayer, Team = nameTeam) %>%
+    mutate(isFinalSeason = isFinalSeason * 1,
+           isWaived = isWaived * 1,
+           isOnRoster = isOnRoster * 1,
+           isNonGuaranteed = isNonGuaranteed * 1,
+           isTeamOption = isTeamOption * 1,
+           isPlayerOption = isPlayerOption * 1)
+  dbWriteTable(con = basketball, value = currentLine, name = paste0("team_salaries"), append = TRUE, overwrite = FALSE)
+  message(i)
+}
 
-
-# get gamelogs from the entire season ----
+# get gamelogs from the entire season STEP 1----
 # we want to exclude "today" because pulling gamelogs from today leads to null values in our dataset
 gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
 for(i in 1:nrow(gameLogs)){
@@ -38,8 +52,9 @@ for(i in 1:nrow(gameLogs)){
   }
 }
 
+# YESTERDAYS GAMES ONLY
 # get schedule for yesterday's games STEP 1 ----
-schedule <- nbastatR::seasons_schedule(seasons=2020, season_type="Regular Season")
+schedule <- seasons_schedule(seasons=2020, season_type="Regular Season")
 sched <- schedule
 yesterday <- Sys.Date()-1
 for(i in nrow(sched):1){
@@ -49,7 +64,7 @@ for(i in nrow(sched):1){
   }
 }
 
-# adding yesterday's games into the full season gamelogs table ----
+# adding yesterday's games into the full season gamelogs table STEP 2----
 gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
 for(i in 1:nrow(gameLogs)){
   dateString <- gameLogs$dateGame[i]
@@ -69,4 +84,3 @@ for(i in 1:nrow(gameLogs)){
     message(i)
   }
 }
-
