@@ -2,11 +2,106 @@ library(nbastatR)
 library(RMySQL)
 library(tidyverse)
 
-
-# connect to MySQL Database ----
+# RUN code until line 101
+# connect to MySQL Database STEP 1 ----
 basketball <- dbConnect(dbDriver('MySQL'), dbname = 'nba2019_20', user = 'root', password = 'password')
 today <- Sys.Date()
 
+
+# YESTERDAYS GAMES ONLY
+# get schedule for yesterday's games STEP 2 ----
+schedule <- seasons_schedule(seasons=2020, season_type="Regular Season")
+sched <- schedule
+yesterday <- Sys.Date()-1
+for(i in nrow(sched):1){
+  dateString <- sched$dateGame[i]
+  if(dateString!=yesterday){
+    Sched <- sched[-c(i),]
+  }
+} # FINISHED SCHEDULE
+
+# adding yesterday's games into the full season gamelogs table STEP 3 ----
+gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
+for(i in 1:nrow(gameLogs)){
+  dateString <- gameLogs$dateGame[i]
+  if(as.Date(dateString)==yesterday){
+    currentLine <- as.data.frame(gameLogs[i,])
+    currentLine <- currentLine %>%
+      select(yearSeason, dateGame, idGame, numberGameTeamSeason, slugTeam, isB2B, isB2BFirst, isB2BSecond, locationGame,
+             countDaysRestTeam, slugOpponent, outcomeGame, namePlayer, idPlayer, fgm, fga, pctFG, fg3m, fg3a, pctFG3, pctFT,
+             fg2m, fg2a, pctFG2, minutes, ftm, fta, oreb, dreb, treb, ast, stl, blk, tov, pf, pts, plusminus) %>%
+      rename(Season = yearSeason, Date = dateGame, GameID = idGame, TeamGamesPlayed = numberGameTeamSeason, Team = slugTeam, 
+             Location = locationGame, DaysRest = countDaysRestTeam, Opponent = slugOpponent, Outcome = outcomeGame, 
+             Player = namePlayer, PlayerID = idPlayer, FGM = fgm, FGA = fga, FGPercent = pctFG, threePFGMade = fg3m, 
+             threePAttempted = fg3a, threePointPercent = pctFG3, FTPercent = pctFT, twoPointFGMade = fg2m, 
+             twoPointFGAttempted = fg2a, twoPointFGPercent = pctFG2, MP = minutes, FTM = ftm, FTA = fta, OREB = oreb,
+             DREB = dreb, TRB = treb, AST = ast, STL = stl, BLK = blk, TOV = tov, PF = pf, PTS = pts, PlusMinus = plusminus)
+    dbWriteTable(con=basketball, value=currentLine, name=paste0("full_season_gamelogs"), append=TRUE, overwrite=FALSE)
+    message(i)
+  }
+} # FINISHED YESTERDAY'S GAMES
+
+#  Injury Table STEP 4 ----
+injuryDB <- bref_injuries()
+dbRemoveTable(basketball,"injuries")
+for(i in 1:nrow(injuryDB)){
+  currentLine <- as.data.frame(injuryDB[i,])
+  currentLine <- currentLine %>%
+    select(namePlayer, nameTeam, statusGame, typeInjury, dateInjury) %>%
+    rename(Player = namePlayer, Team = nameTeam, Status = statusGame, Injury = typeInjury, Date = dateInjury) %>%
+    mutate(Team = replace(Team, Team == 'Atlanta Hawks', 'ATL')) %>%
+    mutate(Team = replace(Team, Team == 'Boston Celtics', 'BOS')) %>%
+    mutate(Team = replace(Team, Team == 'Brooklyn Nets', 'BKN')) %>%
+    mutate(Team = replace(Team, Team == 'Charlotte Hornets', 'CHA')) %>%
+    mutate(Team = replace(Team, Team == 'Chicago Bulls', 'CHI')) %>%
+    mutate(Team = replace(Team, Team == 'Cleveland Cavaliers', 'CLE')) %>%
+    mutate(Team = replace(Team, Team == 'Dallas Mavericks', 'DAL')) %>%
+    mutate(Team = replace(Team, Team == 'Denver Nuggets', 'DEN')) %>%
+    mutate(Team = replace(Team, Team == 'Detroit Pistons', 'DET')) %>%
+    mutate(Team = replace(Team, Team == 'Golden State Warriors', 'GSW')) %>%
+    mutate(Team = replace(Team, Team == 'Houston Rockets', 'HOU')) %>%
+    mutate(Team = replace(Team, Team == 'Indiana Pacers', 'IND')) %>%
+    mutate(Team = replace(Team, Team == 'Los Angeles Clippers', 'LAC')) %>%
+    mutate(Team = replace(Team, Team == 'Los Angeles Lakers', 'LAL')) %>%
+    mutate(Team = replace(Team, Team == 'Memphis Grizzlies', 'MEM')) %>%
+    mutate(Team = replace(Team, Team == 'Miami Heat', 'MIA')) %>%
+    mutate(Team = replace(Team, Team == 'Milwaukee Bucks', 'MIL')) %>%
+    mutate(Team = replace(Team, Team == 'Minnesota Timberwolves', 'MIN')) %>%
+    mutate(Team = replace(Team, Team == 'New Orleans Pelicans', 'NOP')) %>%
+    mutate(Team = replace(Team, Team == 'New York Knicks', 'NYK')) %>%
+    mutate(Team = replace(Team, Team == 'Oklahoma City Thunder', 'OKC')) %>%
+    mutate(Team = replace(Team, Team == 'Orlando Magic', 'ORL')) %>%
+    mutate(Team = replace(Team, Team == 'Philadelphia 76ers', 'PHI')) %>%
+    mutate(Team = replace(Team, Team == 'Phoenix Suns', 'PHX')) %>%
+    mutate(Team = replace(Team, Team == 'Portland Trail Blazers', 'POR')) %>%
+    mutate(Team = replace(Team, Team == 'Sacramento Kings', 'SAC')) %>%
+    mutate(Team = replace(Team, Team == 'San Antonio Spurs', 'SAS')) %>%
+    mutate(Team = replace(Team, Team == 'Toronto Raptors', 'TOR')) %>%
+    mutate(Team = replace(Team, Team == 'Utah Jazz', 'UTA')) %>%
+    mutate(Team = replace(Team, Team == 'Washington Wizards', 'WAS'))
+  dbWriteTable(con=basketball, value=currentLine, name=paste0("injuries"), append = TRUE, overwrite = FALSE)
+  message(i)
+} # FINISHED INJURY TABLE
+
+# Team Offensive + Defensive Rating Table STEP 5 ----
+teamStats <- bref_teams_stats(seasons = 2020)
+dbRemoveTable(basketball, 'teamper100stats')
+for(i in 1:nrow(dataBREFPerPossTeams)){
+  currentLine <- as.data.frame(dataBREFPerPossTeams[i,])
+  currentLine <- currentLine %>%
+    select(slugTeamBREF, ptsPerPossTeam, ptsPerPossOpponent) %>%
+    rename(Team = slugTeamBREF, ORTG = ptsPerPossTeam, DRTG = ptsPerPossOpponent) %>%
+    mutate(DateOfEntry = Sys.Date()-1) %>%
+    mutate(NRTG = ORTG - DRTG) %>%
+    mutate(Team = replace(Team, Team == 'BRK', 'BKN')) %>%
+    mutate(Team = replace(Team, Team == 'PHO', 'PHX')) %>%
+    mutate(Team = replace(Team, Team == 'CHO', 'CHA'))
+  dbWriteTable(con=basketball, value=currentLine, name=paste0("teamper100stats"), append = TRUE, overwrite = FALSE)
+  message(i)
+} # FINISHED OFFENSIVE + DEFENSIVE RATING TABLE // EVERYTHING FINISHED RUNNING
+
+####################################################################################################################################
+# Tables you only need to run once ----
 # Salary Data Only STEP 1 ----
 salary <- nba_insider_salaries(assume_player_opt_out = F,
                      assume_team_doesnt_exercise = F, return_wide = F,
@@ -52,98 +147,6 @@ for(i in 1:nrow(gameLogs)){
   }
 }
 
-# RUN code from Line 55 to Line 145
-# YESTERDAYS GAMES ONLY
-# get schedule for yesterday's games STEP 1 ----
-schedule <- seasons_schedule(seasons=2020, season_type="Regular Season")
-sched <- schedule
-yesterday <- Sys.Date()-1
-for(i in nrow(sched):1){
-  dateString <- sched$dateGame[i]
-  if(dateString!=yesterday){
-    Sched <- sched[-c(i),]
-  }
-} # FINISHED SCHEDULE
-
-# adding yesterday's games into the full season gamelogs table STEP 2----
-gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
-for(i in 1:nrow(gameLogs)){
-  dateString <- gameLogs$dateGame[i]
-  if(as.Date(dateString)==yesterday){
-    currentLine <- as.data.frame(gameLogs[i,])
-    currentLine <- currentLine %>%
-      select(yearSeason, dateGame, idGame, numberGameTeamSeason, slugTeam, isB2B, isB2BFirst, isB2BSecond, locationGame,
-             countDaysRestTeam, slugOpponent, outcomeGame, namePlayer, idPlayer, fgm, fga, pctFG, fg3m, fg3a, pctFG3, pctFT,
-             fg2m, fg2a, pctFG2, minutes, ftm, fta, oreb, dreb, treb, ast, stl, blk, tov, pf, pts, plusminus) %>%
-      rename(Season = yearSeason, Date = dateGame, GameID = idGame, TeamGamesPlayed = numberGameTeamSeason, Team = slugTeam, 
-             Location = locationGame, DaysRest = countDaysRestTeam, Opponent = slugOpponent, Outcome = outcomeGame, 
-             Player = namePlayer, PlayerID = idPlayer, FGM = fgm, FGA = fga, FGPercent = pctFG, threePFGMade = fg3m, 
-             threePAttempted = fg3a, threePointPercent = pctFG3, FTPercent = pctFT, twoPointFGMade = fg2m, 
-             twoPointFGAttempted = fg2a, twoPointFGPercent = pctFG2, MP = minutes, FTM = ftm, FTA = fta, OREB = oreb,
-             DREB = dreb, TRB = treb, AST = ast, STL = stl, BLK = blk, TOV = tov, PF = pf, PTS = pts, PlusMinus = plusminus)
-    dbWriteTable(con=basketball, value=currentLine, name=paste0("full_season_gamelogs"), append=TRUE, overwrite=FALSE)
-    message(i)
-  }
-} # FINISHED YESTERDAY'S GAMES
-
-#  Injury Table
-injuryDB <- bref_injuries()
-dbRemoveTable(basketball,"injuries")
-for(i in 1:nrow(injuryDB)){
-  currentLine <- as.data.frame(injuryDB[i,])
-  currentLine <- currentLine %>%
-    select(namePlayer, nameTeam, statusGame, typeInjury, dateInjury) %>%
-    rename(Player = namePlayer, Team = nameTeam, Status = statusGame, Injury = typeInjury, Date = dateInjury) %>%
-    mutate(Team = replace(Team, Team == 'Atlanta Hawks', 'ATL')) %>%
-    mutate(Team = replace(Team, Team == 'Boston Celtics', 'BOS')) %>%
-    mutate(Team = replace(Team, Team == 'Brooklyn Nets', 'BKN')) %>%
-    mutate(Team = replace(Team, Team == 'Charlotte Hornets', 'CHA')) %>%
-    mutate(Team = replace(Team, Team == 'Chicago Bulls', 'CHI')) %>%
-    mutate(Team = replace(Team, Team == 'Cleveland Cavaliers', 'CLE')) %>%
-    mutate(Team = replace(Team, Team == 'Dallas Mavericks', 'DAL')) %>%
-    mutate(Team = replace(Team, Team == 'Denver Nuggets', 'DEN')) %>%
-    mutate(Team = replace(Team, Team == 'Detroit Pistons', 'DET')) %>%
-    mutate(Team = replace(Team, Team == 'Golden State Warriors', 'GSW')) %>%
-    mutate(Team = replace(Team, Team == 'Houston Rockets', 'HOU')) %>%
-    mutate(Team = replace(Team, Team == 'Indiana Pacers', 'IND')) %>%
-    mutate(Team = replace(Team, Team == 'Los Angeles Clippers', 'LAC')) %>%
-    mutate(Team = replace(Team, Team == 'Los Angeles Lakers', 'LAL')) %>%
-    mutate(Team = replace(Team, Team == 'Memphis Grizzlies', 'MEM')) %>%
-    mutate(Team = replace(Team, Team == 'Miami Heat', 'MIA')) %>%
-    mutate(Team = replace(Team, Team == 'Milwaukee Bucks', 'MIL')) %>%
-    mutate(Team = replace(Team, Team == 'Minnesota Timberwolves', 'MIN')) %>%
-    mutate(Team = replace(Team, Team == 'New Orleans Pelicans', 'NOP')) %>%
-    mutate(Team = replace(Team, Team == 'New York Knicks', 'NYK')) %>%
-    mutate(Team = replace(Team, Team == 'Oklahoma City Thunder', 'OKC')) %>%
-    mutate(Team = replace(Team, Team == 'Orlando Magic', 'ORL')) %>%
-    mutate(Team = replace(Team, Team == 'Philadelphia 76ers', 'PHI')) %>%
-    mutate(Team = replace(Team, Team == 'Phoenix Suns', 'PHX')) %>%
-    mutate(Team = replace(Team, Team == 'Portland Trail Blazers', 'POR')) %>%
-    mutate(Team = replace(Team, Team == 'Sacramento Kings', 'SAC')) %>%
-    mutate(Team = replace(Team, Team == 'San Antonio Spurs', 'SAS')) %>%
-    mutate(Team = replace(Team, Team == 'Toronto Raptors', 'TOR')) %>%
-    mutate(Team = replace(Team, Team == 'Utah Jazz', 'UTA')) %>%
-    mutate(Team = replace(Team, Team == 'Washington Wizards', 'WAS'))
-  dbWriteTable(con=basketball, value=currentLine, name=paste0("injuries"), append = TRUE, overwrite = FALSE)
-  message(i)
-} # FINISHED INJURY TABLE
-
-# Team Offensive + Defensive Rating Table + a little cleaning
-teamStats <- bref_teams_stats(seasons = 2020)
-dbRemoveTable(basketball, 'teamper100stats')
-for(i in 1:nrow(dataBREFPerPossTeams)){
-  currentLine <- as.data.frame(dataBREFPerPossTeams[i,])
-  currentLine <- currentLine %>%
-    select(slugTeamBREF, ptsPerPossTeam, ptsPerPossOpponent) %>%
-    rename(Team = slugTeamBREF, ORTG = ptsPerPossTeam, DRTG = ptsPerPossOpponent) %>%
-    mutate(NRTG = ORTG - DRTG) %>%
-    mutate(Team = replace(Team, Team == 'BRK', 'BKN')) %>%
-    mutate(Team = replace(Team, Team == 'PHO', 'PHX')) %>%
-    mutate(Team = replace(Team, Team == 'CHO', 'CHA'))
-  dbWriteTable(con=basketball, value=currentLine, name=paste0("teamper100stats"), append = TRUE, overwrite = FALSE)
-  message(i)
-} # FINISHED OFFENSIVE + DEFENSIVE RATING TABLE
-
 ##
 ##
 ##
@@ -153,7 +156,6 @@ for(i in 1:nrow(dataBREFPerPossTeams)){
 ##
 ##
 ##
-
 
 # Player Dictionary
 abd <- dictionary_bref_players()
@@ -166,5 +168,31 @@ for(i in 1:nrow(abd)){
     select(namePlayerBREF) %>%
     rename(Player = namePlayerBREF)
   dbWriteTable(con=basketball, value=currentLine, name=paste0("player_dictionary"), append = TRUE, overwrite = FALSE)
+  message(i)
+}
+
+a1 <- hoopshype_salaries(teams = NULL, all_teams = TRUE, assume_player_opt_out = F, assume_team_doesnt_exercise = F)
+a2 <- hoops_hype_salary_summary(return_message = T)
+
+
+# PRACTICE STUFF ----
+##
+##
+##
+?nbastatR
+
+# teams_players_stats and box_scores don't seem to work
+trystats <- teams_players_stats(seasons = 2020, types = 'player', tables = c('hustle'), season_types = 'Regular Season',
+                                measures = 'Base', modes = 'Totals', defenses = 'Overall', is_plus_minus = F, is_pace_adjusted = F,
+                                periods = 0, is_rank = F, game_segments = NA, divisions_against = NA, conferences_against = NA,
+                                date_from = NA, date_to = NA, last_n_games = 0, locations = NA, months = 0)
+
+boxStats <- box_scores(game_ids = schedule$idGame[i], league = 'NBA', box_score_types = 'tracking', result_types = c('player'),
+                       return_message = T)
+
+
+for(i in 1:nrow(dataBREFPerPossTeams)){
+  currentLine <- as.data.frame(dataBREFPerPossTeams[i,])
+  currentLine <- currentLine
   message(i)
 }
