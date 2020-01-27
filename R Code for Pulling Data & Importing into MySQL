@@ -1,12 +1,16 @@
 library(nbastatR)
 library(RMySQL)
 library(tidyverse)
+library(rvest)
+library(xml2)
+library(stringr)
+library(jsonlite)
+library(lubridate)
 
-# RUN code until line 101
+# RUN code until line 125
 # connect to MySQL Database STEP 1 ----
 basketball <- dbConnect(dbDriver('MySQL'), dbname = 'nba2019_20', user = 'root', password = 'password')
 today <- Sys.Date()
-
 
 # YESTERDAYS GAMES ONLY
 # get schedule for yesterday's games STEP 2 ----
@@ -41,14 +45,34 @@ for(i in 1:nrow(gameLogs)){
   }
 } # FINISHED YESTERDAY'S GAMES
 
-#  Injury Table STEP 4 ----
-injuryDB <- bref_injuries()
+# Injury Web Scraping STEP 4 ----
+urlMain <- 'https://www.basketball-reference.com/friv/injuries.fcgi'
+webpageMain <- read_html(urlMain)
+col_namesMain <- webpageMain %>% 
+  html_nodes("table#injuries > thead > tr > th") %>% 
+  html_attr("data-stat")
+player <- webpageMain %>%
+  html_nodes("table#injuries > tbody > tr > th") %>% 
+  html_text()
+dataMain <- webpageMain %>% 
+  html_nodes("table#injuries > tbody > tr > td") %>% 
+  html_text() %>%
+  matrix(ncol = length(col_namesMain) - 1, byrow = TRUE)
+injuryData <- as.data.frame(cbind(player, dataMain), stringsAsFactors = FALSE)
+injuryData <- injuryData %>%
+  rename(Player = player, Team = V2, Date = V3, Description = V4)
+injuryData$Date <- gsub("^.{0,4}", "", injuryData$Date)
+injuryData <- injuryData %>%
+  separate(Description, c('stepone', 'Description'), sep = ' - ')
+injuryData <- injuryData %>%
+  separate(stepone, c('Status', 'Injury'), sep = '\\(')
+injuryData$Injury <- substr(injuryData$Injury, 1, nchar(injuryData$Injury)-1)
+
 dbRemoveTable(basketball,"injuries")
-for(i in 1:nrow(injuryDB)){
-  currentLine <- as.data.frame(injuryDB[i,])
+for(i in 1:nrow(injuryData)){
+  currentLine <- as.data.frame(injuryData[i,])
   currentLine <- currentLine %>%
-    select(namePlayer, nameTeam, statusGame, typeInjury, dateInjury) %>%
-    rename(Player = namePlayer, Team = nameTeam, Status = statusGame, Injury = typeInjury, Date = dateInjury) %>%
+    select(Player, Team, Date, Status, Injury, Description) %>%
     mutate(Team = replace(Team, Team == 'Atlanta Hawks', 'ATL')) %>%
     mutate(Team = replace(Team, Team == 'Boston Celtics', 'BOS')) %>%
     mutate(Team = replace(Team, Team == 'Brooklyn Nets', 'BKN')) %>%
@@ -86,19 +110,19 @@ for(i in 1:nrow(injuryDB)){
 # Team Offensive + Defensive Rating Table STEP 5 ----
 teamStats <- bref_teams_stats(seasons = 2020)
 dbRemoveTable(basketball, 'teamper100stats')
-for(i in 1:nrow(dataBREFPerPossTeams)){
-  currentLine <- as.data.frame(dataBREFPerPossTeams[i,])
+for(i in 1:nrow(dataBREFTeamJoined)){
+  currentLine <- as.data.frame(dataBREFTeamJoined[i,])
   currentLine <- currentLine %>%
-    select(slugTeamBREF, ptsPerPossTeam, ptsPerPossOpponent) %>%
-    rename(Team = slugTeamBREF, ORTG = ptsPerPossTeam, DRTG = ptsPerPossOpponent) %>%
+    select(slugTeamBREF, ortgTeamMisc, drtgTeamMisc, nrtgTeamMisc, paceTeamMisc) %>%
+    rename(Team = slugTeamBREF, ORTG = ortgTeamMisc, DRTG = drtgTeamMisc, NRTG = nrtgTeamMisc, Pace = paceTeamMisc) %>%
     mutate(DateOfEntry = Sys.Date()-1) %>%
-    mutate(NRTG = ORTG - DRTG) %>%
     mutate(Team = replace(Team, Team == 'BRK', 'BKN')) %>%
     mutate(Team = replace(Team, Team == 'PHO', 'PHX')) %>%
     mutate(Team = replace(Team, Team == 'CHO', 'CHA'))
   dbWriteTable(con=basketball, value=currentLine, name=paste0("teamper100stats"), append = TRUE, overwrite = FALSE)
   message(i)
-} # FINISHED OFFENSIVE + DEFENSIVE RATING TABLE // EVERYTHING FINISHED RUNNING
+}
+# FINISHED OFFENSIVE + DEFENSIVE RATING TABLE // EVERYTHING FINISHED RUNNING
 
 ####################################################################################################################################
 # Tables you only need to run once ----
@@ -126,6 +150,7 @@ for(i in 1:nrow(salary)){
 # get gamelogs from the entire season STEP 1----
 # we want to exclude "today" because pulling gamelogs from today leads to null values in our dataset
 gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
+dbRemoveTable(basketball, 'full_season_gamelogs')
 for(i in 1:nrow(gameLogs)){
   if(gameLogs$dateGame[i] != today){
     currentLine <- as.data.frame(gameLogs[i,])
@@ -171,28 +196,4 @@ for(i in 1:nrow(abd)){
   message(i)
 }
 
-a1 <- hoopshype_salaries(teams = NULL, all_teams = TRUE, assume_player_opt_out = F, assume_team_doesnt_exercise = F)
-a2 <- hoops_hype_salary_summary(return_message = T)
 
-
-# PRACTICE STUFF ----
-##
-##
-##
-?nbastatR
-
-# teams_players_stats and box_scores don't seem to work
-trystats <- teams_players_stats(seasons = 2020, types = 'player', tables = c('hustle'), season_types = 'Regular Season',
-                                measures = 'Base', modes = 'Totals', defenses = 'Overall', is_plus_minus = F, is_pace_adjusted = F,
-                                periods = 0, is_rank = F, game_segments = NA, divisions_against = NA, conferences_against = NA,
-                                date_from = NA, date_to = NA, last_n_games = 0, locations = NA, months = 0)
-
-boxStats <- box_scores(game_ids = schedule$idGame[i], league = 'NBA', box_score_types = 'tracking', result_types = c('player'),
-                       return_message = T)
-
-
-for(i in 1:nrow(dataBREFPerPossTeams)){
-  currentLine <- as.data.frame(dataBREFPerPossTeams[i,])
-  currentLine <- currentLine
-  message(i)
-}
