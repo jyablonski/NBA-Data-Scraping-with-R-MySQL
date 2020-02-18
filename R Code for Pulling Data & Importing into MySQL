@@ -7,24 +7,15 @@ library(stringr)
 library(jsonlite)
 library(lubridate)
 
-# RUN code until line 125
-# connect to MySQL Database STEP 1 ----
+# RUN code until line 116
+# connect to MySQL Database ----
 basketball <- dbConnect(dbDriver('MySQL'), dbname = 'nba2019_20', user = 'root', password = 'password')
 today <- Sys.Date()
-
-# YESTERDAYS GAMES ONLY
-# get schedule for yesterday's games STEP 2 ----
-schedule <- seasons_schedule(seasons=2020, season_type="Regular Season")
-sched <- schedule
 yesterday <- Sys.Date()-1
-for(i in nrow(sched):1){
-  dateString <- sched$dateGame[i]
-  if(dateString!=yesterday){
-    Sched <- sched[-c(i),]
-  }
-} # FINISHED SCHEDULE
 
-# adding yesterday's games into the full season gamelogs table STEP 3 ----
+# YESTERDAYS GAMES ONLY ----
+
+# adding yesterday's games into the full season gamelogs table ----
 gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
 for(i in 1:nrow(gameLogs)){
   dateString <- gameLogs$dateGame[i]
@@ -45,7 +36,7 @@ for(i in 1:nrow(gameLogs)){
   }
 } # FINISHED YESTERDAY'S GAMES
 
-# Injury Web Scraping STEP 4 ----
+# Injury Web Scraping ----
 urlMain <- 'https://www.basketball-reference.com/friv/injuries.fcgi'
 webpageMain <- read_html(urlMain)
 col_namesMain <- webpageMain %>% 
@@ -107,8 +98,8 @@ for(i in 1:nrow(injuryData)){
   message(i)
 } # FINISHED INJURY TABLE
 
-# Team Offensive + Defensive Rating Table STEP 5 ----
-teamStats <- bref_teams_stats(seasons = 2020)
+# Team Offensive + Defensive Ratings Table ----
+bref_teams_stats(seasons = 2020)
 dbRemoveTable(basketball, 'teamper100stats')
 for(i in 1:nrow(dataBREFTeamJoined)){
   currentLine <- as.data.frame(dataBREFTeamJoined[i,])
@@ -125,8 +116,9 @@ for(i in 1:nrow(dataBREFTeamJoined)){
 # FINISHED OFFENSIVE + DEFENSIVE RATING TABLE // EVERYTHING FINISHED RUNNING
 
 ####################################################################################################################################
+
 # Tables you only need to run once ----
-# Salary Data Only STEP 1 ----
+# Salary Data Only
 salary <- nba_insider_salaries(assume_player_opt_out = F,
                      assume_team_doesnt_exercise = F, return_wide = F,
                      return_message = T)
@@ -147,8 +139,8 @@ for(i in 1:nrow(salary)){
   message(i)
 }
 
-# get gamelogs from the entire season STEP 1----
-# we want to exclude "today" because pulling gamelogs from today leads to null values in our dataset
+# get gamelogs from the entire season 
+# exclude "today" because pulling gamelogs from today leads to null values in the dataset
 gameLogs <- game_logs(seasons=2020, league="NBA", result_types="player", season_types="Regular Season")
 dbRemoveTable(basketball, 'full_season_gamelogs')
 for(i in 1:nrow(gameLogs)){
@@ -172,16 +164,6 @@ for(i in 1:nrow(gameLogs)){
   }
 }
 
-##
-##
-##
-##
-## practice
-##
-##
-##
-##
-
 # Player Dictionary
 abd <- dictionary_bref_players()
 abd <- abd %>%
@@ -196,4 +178,16 @@ for(i in 1:nrow(abd)){
   message(i)
 }
 
+# Schedule
+
+scheduleMain <- current_schedule()
+dbRemoveTable(basketball, 'schedule')
+for(i in 1:nrow(scheduleMain)) {
+  currentLine <- as.data.frame(scheduleMain[i,])
+  currentLine <- currentLine %>%
+    select(dateGame, timeEasternGame, slugTeamAway, slugTeamHome) %>%
+    rename(Date = dateGame, Time = timeEasternGame, AwayTeam = slugTeamAway, HomeTeam = slugTeamHome)
+  dbWriteTable(con=basketball, value=currentLine, name=paste0("schedule"), append = TRUE, overwrite = FALSE)
+  message(i)
+}# FINISHED SCHEDULE
 
